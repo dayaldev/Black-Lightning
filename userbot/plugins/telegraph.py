@@ -1,104 +1,63 @@
-"""@telegraph Utilities Fix by @Kraken_The_BadASS
-Available Commands:
-.tgm  as reply to a media
-.tgm text as reply to a large text"""
-import os
-from datetime import datetime
+# Copyright (C) 2020-2021 by DevsExpo@Github, < https://github.com/DevsExpo >.
+#
+# This file is part of < https://github.com/DevsExpo/FridayUserBot > project,
+# and is released under the "GNU v3.0 License Agreement".
+# Please see < https://github.com/DevsExpo/blob/master/LICENSE >
+#
+# All rights reserved.
 
-from PIL import Image
+
+import os
+
 from telegraph import Telegraph, exceptions, upload_file
 
-from userbot.utils import lightning_cmd
+from main_startup.core.decorators import friday_on_cmd
+from main_startup.helper_func.basic_helpers import edit_or_reply, get_text
+from main_startup.helper_func.plugin_helpers import convert_to_image
 
 telegraph = Telegraph()
-r = telegraph.create_account(short_name=Config.TELEGRAPH_SHORT_NAME)
+r = telegraph.create_account(short_name="FridayUserBot")
 auth_url = r["auth_url"]
 
 
-@borg.on(lightning_cmd("tg (m|t) ?(.*)"))
-async def _(event):
-    if event.fwd_from:
+@friday_on_cmd(
+    ["telegraph"],
+    cmd_help={
+        "help": "Get Telegraph link of replied image",
+        "example": "{ch}telegraph (reply to text or image)",
+    },
+)
+async def telegrapher(client, message):
+    pablo = await edit_or_reply(message, "`Processing..`")
+    if not message.reply_to_message:
+        await pablo.edit("Reply To Message To Parse it To Telegraph !")
         return
-    if Config.PLUGIN_CHANNEL is None:
-        await event.edit(
-            "Please set the required environment variable `PLUGIN_CHANNEL` for this plugin to work"
-        )
-        return
-    if not os.path.isdir(Config.TMP_DOWNLOAD_DIRECTORY):
-        os.makedirs(Config.TMP_DOWNLOAD_DIRECTORY)
-    await borg.send_message(
-        Config.PLUGIN_CHANNEL,
-        "Created New Telegraph account {} for the current session. \n**Do not give this url to anyone, even if they say they are from Telegram!**".format(
-            auth_url
-        ),
-    )
-    optional_title = event.pattern_match.group(2)
-    if event.reply_to_msg_id:
-        start = datetime.now()
-        r_message = await event.get_reply_message()
-        input_str = event.pattern_match.group(1)
-        if input_str == "m":
-            downloaded_file_name = await borg.download_media(
-                r_message, Config.TMP_DOWNLOAD_DIRECTORY
+    if message.reply_to_message.media:
+        # Assume its media
+        if message.reply_to_message.sticker:
+            m_d = await convert_to_image(message, client)
+        else:
+            m_d = await message.reply_to_message.download()
+        try:
+            media_url = upload_file(m_d)
+        except exceptions.TelegraphException as exc:
+            await pablo.edit(
+                f"`Unable To Upload Media To Telegraph! \nTraceBack : {exc}`"
             )
-            end = datetime.now()
-            ms = (end - start).seconds
-            await event.edit(
-                "Downloaded to {} in {} seconds.".format(downloaded_file_name, ms)
-            )
-            if downloaded_file_name.endswith((".webp")):
-                resize_image(downloaded_file_name)
-            try:
-                start = datetime.now()
-                media_urls = upload_file(downloaded_file_name)
-            except exceptions.TelegraphException as exc:
-                await event.edit("ERROR: " + str(exc))
-                os.remove(downloaded_file_name)
-            else:
-                end = datetime.now()
-                ms_two = (end - start).seconds
-                os.remove(downloaded_file_name)
-                await event.edit(
-                    "Your Telegraph Link by Black Lightning https://telegra.ph{} ".format(
-                        media_urls[0], (ms + ms_two)
-                    ),
-                    link_preview=True,
-                )
-        elif input_str == "t":
-            user_object = await borg.get_entity(r_message.from_id)
-            title_of_page = user_object.first_name  # + " " + user_object.last_name
-            # apparently, all Users do not have last_name field
-            if optional_title:
-                title_of_page = optional_title
-            page_content = r_message.message
-            if r_message.media:
-                if page_content != "":
-                    title_of_page = page_content
-                downloaded_file_name = await borg.download_media(
-                    r_message, Config.TMP_DOWNLOAD_DIRECTORY
-                )
-                m_list = None
-                with open(downloaded_file_name, "rb") as fd:
-                    m_list = fd.readlines()
-                for m in m_list:
-                    page_content += m.decode("UTF-8") + "\n"
-                os.remove(downloaded_file_name)
-            page_content = page_content.replace("\n", "<br>")
-            response = telegraph.create_page(title_of_page, html_content=page_content)
-            end = datetime.now()
-            ms = (end - start).seconds
-            await event.edit(
-                "Pasted ser https://telegra.ph/{} in {} seconds.".format(
-                    response["path"], ms
-                ),
-                link_preview=True,
-            )
-    else:
-        await event.edit(
-            "Reply to a message to get a permanent telegra.ph link. (Inspired by @ControllerBot)"
-        )
-
-
-def resize_image(image):
-    im = Image.open(image)
-    im.save(image, "PNG")
+            os.remove(m_d)
+            return
+        U_done = f"Uploaded To Telegraph! \nLink : https://telegra.ph/{media_url[0]}"
+        await pablo.edit(U_done, disable_web_page_preview=False)
+        os.remove(m_d)
+    elif message.reply_to_message.text:
+        # Assuming its text
+        page_title = get_text(message) if get_text(message) else client.me.first_name
+        page_text = message.reply_to_message.text
+        page_text = page_text.replace("\n", "<br>")
+        try:
+            response = telegraph.create_page(page_title, html_content=page_text)
+        except exceptions.TelegraphException as exc:
+            await pablo.edit(f"`Unable To Create Telegraph! \nTraceBack : {exc}`")
+            return
+        wow_graph = f"Telegraphed! \nLink : https://telegra.ph/{response['path']}"
+        await pablo.edit(wow_graph, disable_web_page_preview=False)
